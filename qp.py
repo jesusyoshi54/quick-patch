@@ -1,6 +1,5 @@
 import requests
 import json
-from datetime import date
 from pathlib import Path
 from html.parser import HTMLParser
 from urllib.parse import urljoin
@@ -8,11 +7,12 @@ import zipfile
 import subprocess
 import sys
 import os
-from functools import partial
+from functools import partial, lru_cache
 from PyQt5.QtCore import *
 from PyQt5.QtGui import *
 from PyQt5.QtWidgets import *
 import shutil
+import breeze_resources
 
 #storage class, but won't data class because I dont have all class data at once
 class Hack():
@@ -95,6 +95,7 @@ def GetAllHacks():
 	p.feed(r.text)
 	return p
 
+@lru_cache(maxsize=25)
 def GetHackPageVersions(hack):
 	url = "https://sm64romhacks.com/" + hack.url
 	r = requests.get(url)
@@ -103,6 +104,44 @@ def GetHackPageVersions(hack):
 	p.feed(r.text)
 	p.root = url
 	return p
+
+class settings(QWidget):
+	def __init__(self,wnd,app):
+		super().__init__()
+		self.resize(200,100) #idk
+		self.setWindowTitle("Quick Patch Settings")
+		font = QFont()
+		font.setPointSize(12)
+		self.setFont(font)
+		self.layout = QVBoxLayout(self)
+		self.setLayout(self.layout)
+		self.wnd = wnd
+		btn = QPushButton("Change Vanilla Rom")
+		btn.clicked.connect(wnd.UpdateVan)
+		self.layout.addWidget(btn)
+		btn = QPushButton("Change Emulator Path")
+		btn.clicked.connect(wnd.UpdateEmu)
+		self.layout.addWidget(btn)
+		#themes
+		# Hbox = QHBoxLayout()
+		# DThemes = ["Dark"]
+		# [self.addRadio(t,Hbox,app) for t in DThemes]
+		# self.layout.addLayout(Hbox)
+		# Hbox = QHBoxLayout()
+		# LThemes = ["Light"]
+		# [self.addRadio(t,Hbox,app) for t in LThemes]
+		# self.layout.addLayout(Hbox)
+	def closeEvent(self,event):
+		self.wnd.updateStatus("Settings saved")
+	def addRadio(self,txt,ly,app):
+		btn = QRadioButton((f"{txt} Theme"))
+		btn.clicked.connect(partial(self.ChangeTheme,app,txt))
+		ly.addWidget(btn)
+	def ChangeTheme(self,app,t):
+		file = QFile((f":/{t.lower()}/stylesheet.qss"))
+		file.open(QFile.ReadOnly | QFile.Text)
+		stream = QTextStream(file)
+		app.setStyleSheet(stream.readAll())
 
 class window(QWidget):
 	def __init__(self):
@@ -115,6 +154,8 @@ class window(QWidget):
 		self.setFont(font)
 		self.layout = QVBoxLayout(self)
 		self.setLayout(self.layout)
+	def closeEvent(self,event):
+		self.settings.close()
 	def Add(self,x,y):
 		if y == None:
 			self.layout.addWidget(x)
@@ -170,6 +211,8 @@ class window(QWidget):
 		self.vers = vers
 		self.verlist.Clear()
 		self.verlist.AddVersions(vers.hacks)
+	def chng_settings(self,settings):
+		settings.show()
 	def DownloadHack(self,widg):
 		if not self.vanilla:
 			van = self.getFile()
@@ -332,15 +375,25 @@ def InitGui(rhp,js,jsPath):
 	wnd.verlist = VersionList
 	wnd.downloaded = DownloadedHacks
 	wnd.UpdateDownloadedHacks(DownloadedHacks)
-	#bottom buttons
+	wnd.hacklist.AddHacks(rhp.hacks)
+	#bottom buttons layout
 	BotRow = QHBoxLayout()
+	wnd.AddLayout(BotRow)
+	#settings window
+	qp_set = settings(wnd,app)
+	wnd.settings = qp_set
+	btn = wnd.AddBtn("Change Settings", Bind = partial(wnd.chng_settings,qp_set),layout = BotRow)
+	#launch rom button
+	btn = wnd.AddBtn("Launch Rom", Bind = wnd.launchRomBtn,layout = BotRow)
+	#add js vars
 	wnd.js = js
 	wnd.jsPath = jsPath
-	wnd.AddLayout(BotRow)
-	wnd.hacklist.AddHacks(rhp.hacks)
-	btn = wnd.AddBtn("Update Emu", Bind = partial(wnd.UpdateEmu),layout = BotRow)
-	btn = wnd.AddBtn("Update Vanilla", Bind = partial(wnd.UpdateVan),layout = BotRow)
-	btn = wnd.AddBtn("Launch Rom", Bind =wnd.launchRomBtn,layout = BotRow)
+	
+	#start with dark theme as default
+	file = QFile(":/dark/stylesheet.qss")
+	file.open(QFile.ReadOnly | QFile.Text)
+	stream = QTextStream(file)
+	app.setStyleSheet(stream.readAll())
 	if not js.get('Vanilla'):
 		dg = QFileDialog()
 		# dg.setacceptMode(QFileDialog.AcceptOpen)

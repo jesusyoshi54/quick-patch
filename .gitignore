@@ -6,3 +6,4 @@ build/**
 flips.exe
 flipscfg.bin
 config.json
+themes/**
