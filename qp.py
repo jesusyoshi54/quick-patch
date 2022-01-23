@@ -19,17 +19,22 @@ class Hack():
 	def print_dat(self):
 		print(self.__dict__)
 	def DownloadAndPatch(self,root,vanilla):
-		name = Path(f'hacks/{self.HackName}/{self.Version}')
+		invalid = r'<>:"/\|?*'
+		def rpinv(x):
+			for a in invalid:
+				x = x.replace(a,' ')
+			return x
+		name = Path(f'hacks/{rpinv(self.HackName)}/{rpinv(self.Version)}')
 		if os.path.exists(name):
 			shutil.rmtree(name)
 		name.mkdir(exist_ok=True,parents=True)
 		hack = requests.get(urljoin(root,self.url))
-		with open(name / (f'{self.HackName}_ver_{self.Version}.zip'),'wb') as f:
+		with open(name / (f'{rpinv(self.HackName)}_ver_{rpinv(self.Version)}.zip'),'wb') as f:
 			f.write(hack.content)
-		with zipfile.ZipFile(name / (f'{self.HackName}_ver_{self.Version}.zip')) as zip_ref:
+		with zipfile.ZipFile(name / (f'{rpinv(self.HackName)}_ver_{rpinv(self.Version)}.zip')) as zip_ref:
 			zip_ref.extractall(name)
 		bps = self.FindBps(name)
-		subprocess.call(['flips','--apply',name / bps, vanilla, name / (f'{self.HackName}.z64'),'--ignore-checksum'])
+		subprocess.call(['flips','--apply',name / bps, vanilla, name / (f'{rpinv(self.HackName)}.z64'),'--ignore-checksum'])
 	def FindBps(self, path):
 		p = os.path.join(os.getcwd(),path)
 		for f in os.listdir(p):
@@ -146,11 +151,11 @@ class settings(QWidget):
 class window(QWidget):
 	def __init__(self):
 		super().__init__()
-		self.resize(550,900) #idk
+		self.resize(800,900) #idk
 		self.setWindowTitle("Quick Patch")
 		self.setAcceptDrops(True)
 		font = QFont()
-		font.setPointSize(12)
+		font.setPointSize(11)
 		self.setFont(font)
 		self.layout = QVBoxLayout(self)
 		self.setLayout(self.layout)
@@ -239,7 +244,7 @@ class window(QWidget):
 	def UpdateHackList(self,hacklist,text):
 		hacklist.Clear()
 		for a in self.rhp.hacks:
-			if text.lower() in a.HackName.lower():
+			if text.lower() in a.HackName.lower() or text.lower() in a.Creator.lower():
 				hacklist.AddItem(f'{a.HackName}',a)
 	def launchRomBtn(self):
 		a = self.downloaded.widget.currentItem()
@@ -307,6 +312,7 @@ class window(QWidget):
 class List():
 	def __init__(self):
 		self.widget = QListWidget()
+		self.widget.setWordWrap(True)
 		self.D = {}
 		self.offset = 0
 		self.numInserts = 0
@@ -315,7 +321,7 @@ class List():
 		self.widget.addItem(item)
 	def AddHacks(self,hacks):
 		for h in hacks:
-			self.AddItem(f'{h.HackName}',h)
+			self.AddItem(f'{h.HackName} - {h.Creator}',h)
 	def AddVersions(self,hacks):
 		for h in hacks:
 			self.AddItem(f'Version {h.Version}',h)
@@ -330,6 +336,7 @@ class Tree():
 		self.widget = QTreeWidget()
 		self.widget.setColumnCount(1)
 		self.widget.setHeaderHidden(True)
+		self.widget.setWordWrap(True)
 	def AddItem(self,item,parent):
 		a = QTreeWidgetItem(parent)
 		a.setText(0,item)
