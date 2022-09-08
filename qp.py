@@ -1,12 +1,7 @@
-import requests
-import json
+import requests, json, zipfile, subprocess, sys, os, shutil
 from pathlib import Path
 from html.parser import HTMLParser
 from urllib.parse import urljoin
-import zipfile
-import subprocess
-import sys
-import os
 from functools import partial, lru_cache
 from PyQt5.QtCore import *
 from PyQt5.QtGui import *
@@ -43,7 +38,6 @@ class Hack():
 		return None
 
 class romhacksParser(HTMLParser):
-	#basically an init but I don't feel like dealing with inheritance python nonsense since I never learned it
 	mainMap = {
 	1: 'HackName',
 	2: 'Creator',
@@ -111,7 +105,7 @@ def GetHackPageVersions(hack):
 	return p
 
 class settings(QWidget):
-	def __init__(self,wnd,app):
+	def __init__(self, wnd, app):
 		super().__init__()
 		self.resize(200,100) #idk
 		self.setWindowTitle("Quick Patch Settings")
@@ -127,6 +121,8 @@ class settings(QWidget):
 		btn = QPushButton("Change Emulator Path")
 		btn.clicked.connect(wnd.UpdateEmu)
 		self.layout.addWidget(btn)
+		wnd.pj16 = QCheckBox("emu is pj64 1.6")
+		self.layout.addWidget(wnd.pj16)
 		#themes
 		# Hbox = QHBoxLayout()
 		# DThemes = ["Dark"]
@@ -263,7 +259,10 @@ class window(QWidget):
 			else:
 				self.updateStatus("Choose emu to launch roms")
 				return
-		subprocess.Popen(f"{self.emulator} {hack}",stdin=None, stdout=None, stderr=None, text=True)
+		if self.pj16.isChecked():
+			subprocess.Popen(f'{self.emulator} {hack}',stdin=None, stdout=None, stderr=None, text=True)
+		else:
+			subprocess.Popen(f'{self.emulator} "{hack}"',stdin=None, stdout=None, stderr=None, text=True)
 	def UpdateEmu(self):
 		fname = QFileDialog.getOpenFileName(self, 'choose emulator', 
 		'c:\\',"executables (*.exe)")[0]
