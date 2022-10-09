@@ -42,6 +42,7 @@ class romhacksParser(HTMLParser):
 	1: 'HackName',
 	2: 'Creator',
 	3: 'Release',
+    4: 'Tags'
 	}
 	HackMap = {
 	1: 'HackName',
