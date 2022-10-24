@@ -1,4 +1,6 @@
 import requests, json, zipfile, subprocess, sys, os, shutil
+from collections import namedtuple
+from re import subn
 from pathlib import Path
 from html.parser import HTMLParser
 from urllib.parse import urljoin
@@ -39,18 +41,18 @@ class Hack():
 
 class romhacksParser(HTMLParser):
 	mainMap = {
-	1: 'HackName',
-	2: 'Creator',
-	3: 'Release',
-    4: 'Tags'
+		1: 'HackName',
+		2: 'Creator',
+		3: 'Release',
+		4: 'Tags'
 	}
 	HackMap = {
-	1: 'HackName',
-	2: 'Version',
-	3: 'Link',
-	4: 'Creator',
-	5: 'Star_Count',
-	6: 'Release',
+		1: 'HackName',
+		2: 'Version',
+		3: 'Link',
+		4: 'Creator',
+		5: 'Star_Count',
+		6: 'Release',
 	}
 	def start(self,main):
 		self.HackTable = False
@@ -87,12 +89,30 @@ class romhacksParser(HTMLParser):
 		if tag=='table' and self.HackTable:
 			self.HackTable = False
 
+#format the json
+def Format_SM64RH_JS(js):
+	h_list = namedtuple("hack_list", "hacks")
+	h = []
+	base = "hacks/"
+	def GetCreator(hack):
+		creators = set()
+		for v in hack["versions"]:
+			creators.update(v["creators"])
+		return ", ".join(creators)
+	for hack in js:
+		h_obj = Hack()
+		h_obj.HackName = hack["name"]
+		h_obj.Creator = GetCreator(hack)
+		link = subn("[ ()]", "_", hack["name"])[0]
+		link = subn("[':/]", "", link)[0]
+		link = base + link.strip().lower()
+		h_obj.url = link
+		h.append(h_obj)
+	return h_list(h)
+
 def GetAllHacks():
-	url = "https://sm64romhacks.com/"
-	r = requests.get(url)
-	p = romhacksParser()
-	p.start(1)
-	p.feed(r.text)
+	url = "https://sm64romhacks.com/_data/hacks.json"
+	p = Format_SM64RH_JS(requests.get(url).json()["hacks"])
 	return p
 
 @lru_cache(maxsize=25)
@@ -242,7 +262,7 @@ class window(QWidget):
 		hacklist.Clear()
 		for a in self.rhp.hacks:
 			if text.lower() in a.HackName.lower() or text.lower() in a.Creator.lower():
-				hacklist.AddItem(f'{a.HackName}',a)
+				hacklist.AddItem(f'{a.HackName} - {a.Creator}',a)
 	def launchRomBtn(self):
 		a = self.downloaded.widget.currentItem()
 		if a:
