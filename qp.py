@@ -1,454 +1,435 @@
 import requests, json, zipfile, subprocess, sys, os, shutil
-from collections import namedtuple
-from re import subn
 from pathlib import Path
-from html.parser import HTMLParser
 from urllib.parse import urljoin
-from functools import partial, lru_cache
+from functools import partial
 from PyQt5.QtCore import *
 from PyQt5.QtGui import *
 from PyQt5.QtWidgets import *
-import shutil
+
+# the themes
 import breeze_resources
 
-#storage class, but won't data class because I dont have all class data at once
-class Hack():
-	def print_dat(self):
-		print(self.__dict__)
-	def DownloadAndPatch(self,root,vanilla):
-		invalid = r'<>:"/\|?*'
-		def rpinv(x):
-			for a in invalid:
-				x = x.replace(a,' ')
-			return x
-		name = Path(f'hacks/{rpinv(self.HackName)}/{rpinv(self.Version)}')
-		if os.path.exists(name):
-			shutil.rmtree(name)
-		name.mkdir(exist_ok=True,parents=True)
-		hack = requests.get(urljoin(root,self.url))
-		with open(name / (f'{rpinv(self.HackName)}_ver_{rpinv(self.Version)}.zip'),'wb') as f:
-			f.write(hack.content)
-		with zipfile.ZipFile(name / (f'{rpinv(self.HackName)}_ver_{rpinv(self.Version)}.zip')) as zip_ref:
-			zip_ref.extractall(name)
-		bps = self.FindBps(name)
-		subprocess.call(['flips','--apply',name / bps, vanilla, name / (f'{rpinv(self.HackName)}.z64'),'--ignore-checksum'])
-	def FindBps(self, path):
-		p = os.path.join(os.getcwd(),path)
-		for f in os.listdir(p):
-			if '.bps' in Path(f).suffixes:
-				return f
-		return None
+# these are submodules stuff I wrote
+from sm64rh import *
 
-class romhacksParser(HTMLParser):
-	mainMap = {
-		1: 'HackName',
-		2: 'Creator',
-		3: 'Release',
-		4: 'Tags'
-	}
-	HackMap = {
-		1: 'HackName',
-		2: 'Version',
-		3: 'Link',
-		4: 'Creator',
-		5: 'Star_Count',
-		6: 'Release',
-	}
-	def start(self,main):
-		self.HackTable = False
-		self.hacks = []
-		self.main = main
-		self.lastHack = 0
-		self.header = 0
-		self.cell = None
-	def handle_data(self,data):
-		if self.HackTable and self.cell:
-			if self.main:
-				setattr(self.lastHack,self.mainMap[self.cell],data)
-			else:
-				setattr(self.lastHack,self.HackMap[self.cell],data)
-	def handle_starttag(self,tag,attrs):
-		if tag=='table':
-			for a in attrs:
-				if a[0]=='id' and a[1]=='myTable':
-					self.HackTable = True
-		if tag=='tr' and self.HackTable:
-			if not self.header:
-				self.header = 1
-			else:
-				self.cell = 0
-				self.lastHack = Hack()
-				self.hacks.append(self.lastHack)
-		if tag=='td' and self.HackTable:
-			self.cell += 1
-		if tag=='a' and self.HackTable:
-			for a in attrs:
-				if a[0]=='href':
-					self.lastHack.url = a[1]
-	def handle_endtag(self,tag):
-		if tag=='table' and self.HackTable:
-			self.HackTable = False
+"""
+The GUI works by getting a list of hacks from scraping sm64RH or RHDC (in the future).
+Given a list of hacks, they are displayed in the left column, you can search/filter hacks from the top bar.
+On the top right will display versions of hacks for the selected hack.
+If you double click a version, or click and hit the download button, the hack will download and patch.
+At the bottom right is a library of hacks. It is filtered by game name and version.
+The hack library is retrieved by scanning the OS for hacks in the folder 'hacks' in the same directory as quick patch.
+Launching a ROM will launch it via the selected emulator.
 
-#format the json
-def Format_SM64RH_JS(js):
-	h_list = namedtuple("hack_list", "hacks")
-	h = []
-	base = "hacks/"
-	def GetCreator(hack):
-		creators = set()
-		for v in hack["versions"]:
-			creators.update(v["creators"])
-		return ", ".join(creators)
-	for hack in js:
-		h_obj = Hack()
-		h_obj.HackName = hack["name"]
-		h_obj.Creator = GetCreator(hack)
-		link = subn("[ ()]", "_", hack["name"])[0]
-		link = subn("[':/]", "", link)[0]
-		link = base + link.strip().lower()
-		h_obj.url = link
-		h.append(h_obj)
-	return h_list(h)
+At the very top of the GUI should be a status, the status will be updated on each user action to let them
+know what actions are being taken by the GUI.
 
-def GetAllHacks():
-	url = "https://sm64romhacks.com/_data/hacks.json"
-	p = Format_SM64RH_JS(requests.get(url).json()["hacks"])
-	return p
-
-@lru_cache(maxsize=25)
-def GetHackPageVersions(hack):
-	url = "https://sm64romhacks.com/" + hack.url
-	r = requests.get(url)
-	p = romhacksParser()
-	p.start(0)
-	p.feed(r.text)
-	p.root = url
-	return p
-
-class settings(QWidget):
-	def __init__(self, wnd, app):
-		super().__init__()
-		self.resize(200,100) #idk
-		self.setWindowTitle("Quick Patch Settings")
-		font = QFont()
-		font.setPointSize(12)
-		self.setFont(font)
-		self.layout = QVBoxLayout(self)
-		self.setLayout(self.layout)
-		self.wnd = wnd
-		btn = QPushButton("Change Vanilla Rom")
-		btn.clicked.connect(wnd.UpdateVan)
-		self.layout.addWidget(btn)
-		btn = QPushButton("Change Emulator Path")
-		btn.clicked.connect(wnd.UpdateEmu)
-		self.layout.addWidget(btn)
-		wnd.pj16 = QCheckBox("emu is pj64 1.6")
-		self.layout.addWidget(wnd.pj16)
-		#themes
-		# Hbox = QHBoxLayout()
-		# DThemes = ["Dark"]
-		# [self.addRadio(t,Hbox,app) for t in DThemes]
-		# self.layout.addLayout(Hbox)
-		# Hbox = QHBoxLayout()
-		# LThemes = ["Light"]
-		# [self.addRadio(t,Hbox,app) for t in LThemes]
-		# self.layout.addLayout(Hbox)
-	def closeEvent(self,event):
-		self.wnd.updateStatus("Settings saved")
-	def addRadio(self,txt,ly,app):
-		btn = QRadioButton((f"{txt} Theme"))
-		btn.clicked.connect(partial(self.ChangeTheme,app,txt))
-		ly.addWidget(btn)
-	def ChangeTheme(self,app,t):
-		file = QFile((f":/{t.lower()}/stylesheet.qss"))
-		file.open(QFile.ReadOnly | QFile.Text)
-		stream = QTextStream(file)
-		app.setStyleSheet(stream.readAll())
-
-class window(QWidget):
-	def __init__(self):
-		super().__init__()
-		self.resize(800,900) #idk
-		self.setWindowTitle("Quick Patch")
-		self.setAcceptDrops(True)
-		font = QFont()
-		font.setPointSize(11)
-		self.setFont(font)
-		self.layout = QVBoxLayout(self)
-		self.setLayout(self.layout)
-	def closeEvent(self,event):
-		self.settings.close()
-	def Add(self,x,y):
-		if y == None:
-			self.layout.addWidget(x)
-		else:
-			y.addWidget(x)
-	def dragEnterEvent(self,e):
-		if e.mimeData().hasText():
-			if 'file' in e.mimeData().text() and ('.bps' or '.z64' in e.mimeData().text()):
-				e.accept()
-		else:
-			e.ignore()
-	def dropEvent(self,e):
-		f = Path(e.mimeData().text()[8:])
-		d = f.parent
-		name = f.stem
-		if not self.vanilla:
-			van = self.getFile()
-			if not van:
-				self.updateStatus("choose vanilla rom to patch")
-				return
-		if '.bps' in f.suffixes:
-			subprocess.call(['flips','--apply', f, self.vanilla, d / (f'{name}.z64'), '--ignore-checksum'])
-			self.updateStatus(f'{name}.z64 rom created')
-		if '.z64' in f.suffixes:
-			subprocess.call(['flips','--create', self.vanilla, f, d / (f'{name}.bps'),'--ignore-checksum'])
-			self.updateStatus(f'{name}.bps patch created')
-	def updateStatus(self,s):
-		self.status.setText(s)
-	def AddLabel(self,text = None, Bind = None, layout = None):
-		lab = QLabel(text)
-		self.Add(lab,layout)
-		return lab
-	def AddBtn(self,text = None, Bind = None, layout = None):
-		btn = QPushButton(text)
-		if Bind:
-			btn.clicked.connect(Bind)
-		self.Add(btn,layout)
-		return btn
-	def AddEntry(self,text = None, Bind = None, layout = None):
-		ent = QLineEdit(text)
-		if Bind:
-			ent.returnPressed.connect(Bind)
-		self.Add(ent,layout)
-		return ent
-	def AddLayout(self, LY, layout = None):
-		if layout:
-			layout.addLayout(LY)
-		else:
-			self.layout.addLayout(LY)
-		return LY
-	def ChooseHack(self,widg):
-		vers = GetHackPageVersions(widg.GetHack())
-		self.vers = vers
-		self.verlist.Clear()
-		self.verlist.AddVersions(vers.hacks)
-	def chng_settings(self,settings):
-		settings.show()
-	def DownloadHack(self,widg):
-		if not self.vanilla:
-			van = self.getFile()
-			if not van:
-				self.updateStatus("choose vanilla rom to patch")
-				return
-		widg.GetHack().DownloadAndPatch(self.vers.root,self.vanilla)
-		self.updateStatus(f'{widg.GetHack().HackName} ver {widg.GetHack().Version} downloaded and patched')
-		self.UpdateDownloadedHacks(self.downloaded)
-	def getFile(self):
-		fname = QFileDialog.getOpenFileName(self, 'choose vanilla', 
-			'c:\\',"z64 files (*.z64)")[0]
-		if not fname:
-			self.updateStatus("no ROM selected")
-			return None
-		with open(fname,'rb') as mario:
-			m = mario.read()
-			if b'cZ+\xff\x8b\x02#&' == m[16:24]:
-				self.updateStatus("Vanilla Rom Chosen Sucessfully")
-				return fname
-			else:
-				self.updateStatus("Wrong ROM chosen")
-				self.getFile()
-	def UpdateHackList(self,hacklist,text):
-		hacklist.Clear()
-		for a in self.rhp.hacks:
-			if text.lower() in a.HackName.lower() or text.lower() in a.Creator.lower():
-				hacklist.AddItem(f'{a.HackName} - {a.Creator}',a)
-	def launchRomBtn(self):
-		a = self.downloaded.widget.currentItem()
-		if a:
-			self.TreeLaunch(a)
-	def launchRom(self,hack):
-		if not js.get("emulator"):
-			fname = QFileDialog.getOpenFileName(self, 'choose emulator', 
-			'c:\\',"executables (*.exe)")[0]
-			if fname:
-				self.emulator = fname
-				self.js["emulator"] = fname
-				jsF = open(self.jsPath,'w')
-				jsF.write(json.dumps(self.js))
-				jsF.close()
-			else:
-				self.updateStatus("Choose emu to launch roms")
-				return
-		if self.pj16.isChecked():
-			subprocess.Popen(f'{self.emulator} {hack}',stdin=None, stdout=None, stderr=None, text=True)
-		else:
-			subprocess.Popen(f'{self.emulator} "{hack}"',stdin=None, stdout=None, stderr=None, text=True)
-	def UpdateEmu(self):
-		fname = QFileDialog.getOpenFileName(self, 'choose emulator', 
-		'c:\\',"executables (*.exe)")[0]
-		if fname:
-			self.emulator = fname
-			self.js["emulator"] = fname
-			jsF = open(self.jsPath,'w')
-			jsF.write(json.dumps(self.js))
-			jsF.close()
-		else:
-			self.updateStatus("Choose emu to launch roms")
-	def UpdateVan(self):
-		fname = self.getFile()
-		if fname:
-			self.emulator = fname
-			self.js["emulator"] = fname
-			jsF = open(self.jsPath,'w')
-			jsF.write(json.dumps(self.js))
-			jsF.close()
-		else:
-			self.updateStatus("Choose good ROM")
-	def UpdateDownloadedHacks(self,downloaded):
-		downloaded.Clear()
-		Path("hacks").mkdir(exist_ok=True,parents=True)
-		for a in os.listdir(os.path.join(os.getcwd(),"hacks")):
-			item = downloaded.AddItem(a,downloaded.widget)
-			self.AddDownloadedVers(downloaded,a,item)
-	def AddDownloadedVers(self,downloaded,name,item):
-		vers = downloaded.GetFolder(name)
-		for a in vers:
-			b = downloaded.AddItem(f"{a}",item)
-	def TreeLaunch(self,a):
-		if a.childCount()==0:
-			ver = a.text(0)
-			p = Path(os.getcwd())
-			p = p / "hacks" / a.parent().text(0) / ver
-			r = self.FindRom(p)
-			self.launchRom(str(Path("hacks") / a.parent().text(0) / ver / r))
-	def FindRom(self, p):
-		for f in os.listdir(p):
-			if '.z64' in Path(f).suffixes:
-				return f
-		return None
-
-#make list widget an attr of this class
-class List():
-	def __init__(self):
-		self.widget = QListWidget()
-		self.widget.setWordWrap(True)
-		self.D = {}
-		self.offset = 0
-		self.numInserts = 0
-	def AddItem(self,item,hack):
-		self.D[self.widget.count()] = hack
-		self.widget.addItem(item)
-	def AddHacks(self,hacks):
-		for h in hacks:
-			self.AddItem(f'{h.HackName} - {h.Creator}',h)
-	def AddVersions(self,hacks):
-		for h in hacks:
-			self.AddItem(f'Version {h.Version}',h)
-	def Clear(self):
-		self.widget.clear()
-		self.D = {}
-	def GetHack(self):
-		return self.D[self.widget.currentRow()]
-
-class Tree():
-	def __init__(self):
-		self.widget = QTreeWidget()
-		self.widget.setColumnCount(1)
-		self.widget.setHeaderHidden(True)
-		self.widget.setWordWrap(True)
-	def AddItem(self,item,parent):
-		a = QTreeWidgetItem(parent)
-		a.setText(0,item)
-		self.widget.addTopLevelItem(a)
-		return a
-	def Clear(self):
-		self.widget.clear()
-	def GetFolder(self,name):
-		return os.listdir(os.path.join(os.getcwd(),Path(f"hacks/{name}")))
-
-def InitGui(rhp,js,jsPath):
-	#build GUI
-	app = QApplication([])
-	wnd = window()
-	wnd.rhp = rhp
-	TopRow = QHBoxLayout()
-	wnd.status = wnd.AddLabel('Boot Success')
-	wnd.status.setAlignment(Qt.AlignCenter)
-	ent = wnd.AddEntry(Bind = None)
-	wnd.AddLayout(TopRow)
-	#make hack list widget
-	HackList = List()
-	HackList.widget.clicked.connect(partial(wnd.ChooseHack,HackList))
-	HackList.widget.setAlternatingRowColors(True)
-	ent.textChanged.connect(partial(wnd.UpdateHackList,HackList))
-	#version list and downloaded hacks
-	DownloadedHacks = Tree()
-	DownloadedHacks.widget.itemDoubleClicked.connect(wnd.TreeLaunch)
-	VersionList = List()
-	VersionList.widget.doubleClicked.connect(partial(wnd.DownloadHack,VersionList))
-	MidRow = QHBoxLayout()
-	VerSplit = QVBoxLayout()
-	MidRow.addWidget(HackList.widget)
-	vers = wnd.AddLabel('Versions', layout = VerSplit)
-	VerSplit.addWidget(VersionList.widget)
-	wnd.AddLabel('Downloaded Hacks', layout = VerSplit)
-	VerSplit.addWidget(DownloadedHacks.widget)
-	#adding layouts
-	wnd.AddLayout(MidRow)
-	wnd.AddLayout(VerSplit,layout = MidRow)
-	wnd.show()
-	wnd.hacklist = HackList
-	wnd.verlist = VersionList
-	wnd.downloaded = DownloadedHacks
-	wnd.UpdateDownloadedHacks(DownloadedHacks)
-	wnd.hacklist.AddHacks(rhp.hacks)
-	#bottom buttons layout
-	BotRow = QHBoxLayout()
-	wnd.AddLayout(BotRow)
-	#settings window
-	qp_set = settings(wnd,app)
-	wnd.settings = qp_set
-	btn = wnd.AddBtn("Change Settings", Bind = partial(wnd.chng_settings,qp_set),layout = BotRow)
-	#launch rom button
-	btn = wnd.AddBtn("Launch Rom", Bind = wnd.launchRomBtn,layout = BotRow)
-	#add js vars
-	wnd.js = js
-	wnd.jsPath = jsPath
-	
-	#start with dark theme as default
-	file = QFile(":/dark/stylesheet.qss")
-	file.open(QFile.ReadOnly | QFile.Text)
-	stream = QTextStream(file)
-	app.setStyleSheet(stream.readAll())
-	if not js.get('Vanilla'):
-		dg = QFileDialog()
-		# dg.setacceptMode(QFileDialog.AcceptOpen)
-		# dg.setFilter("rom files (*.z64)")
-		van = wnd.getFile()
-		if van:
-			js["Vanilla"] = van
-		else:
-			js["Vanilla"] = None
-		jsF = open(jsPath,'w')
-		jsF.write(json.dumps(js))
-		jsF.close()
-	wnd.vanilla = js["Vanilla"]
-	wnd.emulator = js.get("emulator")
-	sys.exit(app.exec_())
+A JSON file is used to store settings for this program. The settings are the vanilla ROM, which is used for patching.
+The emulator which is used to launch a ROM.
+The JSON can easily be extended to hold settings used for ROM launching such as plugins.
+These settings will need to be emulator dependent.
+"""
 
 
-if __name__=='__main__':
-	jsPath = Path("config.json")
-	if jsPath.exists():
-		jsF = open(jsPath,'r')
-	else:
-		#create file
-		jsF = open(jsPath,'w')
-		jsF.write('{}')
-		jsF.close()
-		jsF = open(jsPath,'r')
-	js = json.load(jsF)
-	jsF.close()
-	rhp = GetAllHacks()
-	InitGui(rhp,js,jsPath)
+class Main_Window(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.resize(800, 900)  # idk
+        self.setWindowTitle("Quick Patch")
+        self.setAcceptDrops(True)
+        font = QFont()
+        font.setPointSize(11)
+        self.setFont(font)
+        self.layout = QVBoxLayout(self)
+        self.setLayout(self.layout)
+
+    # these are overrides from the base QWidget class
+    def closeEvent(self, event):
+        self.settings.close()
+
+    def dragEnterEvent(self, e):
+        if e.mimeData().hasText():
+            if "file" in e.mimeData().text() and (
+                ".bps" or ".z64" in e.mimeData().text()
+            ):
+                e.accept()
+        else:
+            e.ignore()
+
+    def dropEvent(self, e):
+        f = Path(e.mimeData().text()[8:])
+        d = f.parent
+        name = f.stem
+        if not self.vanilla:
+            van = self.getFile()
+            if not van:
+                self.updateStatus("choose vanilla rom to patch")
+                return
+        if ".bps" in f.suffixes:
+            subprocess.call(
+                [
+                    "flips",
+                    "--apply",
+                    f,
+                    self.vanilla,
+                    d / (f"{name}.z64"),
+                    "--ignore-checksum",
+                ]
+            )
+            self.updateStatus(f"{name}.z64 rom created")
+        if ".z64" in f.suffixes:
+            subprocess.call(
+                [
+                    "flips",
+                    "--create",
+                    self.vanilla,
+                    f,
+                    d / (f"{name}.bps"),
+                    "--ignore-checksum",
+                ]
+            )
+            self.updateStatus(f"{name}.bps patch created")
+
+    # base methods to make building GUI easier
+    def add_widget(self, x, y):
+        if y == None:
+            self.layout.addWidget(x)
+        else:
+            y.addWidget(x)
+
+    def add_label(self, text=None, Bind=None, layout=None):
+        lab = QLabel(text)
+        self.add_widget(lab, layout)
+        return lab
+
+    def add_button(self, text=None, Bind=None, layout=None):
+        btn = QPushButton(text)
+        if Bind:
+            btn.clicked.connect(Bind)
+        self.add_widget(btn, layout)
+        return btn
+
+    def add_entry(self, text=None, Bind=None, layout=None):
+        ent = QLineEdit(text)
+        if Bind:
+            ent.returnPressed.connect(Bind)
+        self.add_widget(ent, layout)
+        return ent
+
+    def add_layout(self, LY, layout=None):
+        if layout:
+            layout.addLayout(LY)
+        else:
+            self.layout.addLayout(LY)
+        return LY
+
+    # GUI functions
+
+    # display site content, search/versions
+    def ChooseHack(self, widg):
+        vers = get_sm64rh_hack_page(widg.get_hack())
+        self.vers = vers
+        self.verlist.clear()
+        self.verlist.add_versions(vers.hacks)
+
+    def UpdateHackList(self, hacklist, text):
+        hacklist.Clear()
+        for a in self.rhp.hacks:
+            if text.lower() in a.HackName.lower() or text.lower() in a.Creator.lower():
+                hacklist.add_item(f"{a.HackName} - {a.Creator}", a)
+
+    def updateStatus(self, s):
+        self.status.setText(s)
+
+    # settings
+    def chng_settings(self, settings):
+        settings.show()
+
+    # launching a ROM
+    def launchRomBtn(self):
+        a = self.downloaded.widget.currentItem()
+        if a:
+            self.TreeLaunch(a)
+
+    def TreeLaunch(self, a):
+        if a.childCount() == 0:
+            ver = a.text(0)
+            p = Path(os.getcwd())
+            p = p / "hacks" / a.parent().text(0) / ver
+            r = self.FindRom(p)
+            self.launchRom(str(Path("hacks") / a.parent().text(0) / ver / r))
+
+    def FindRom(self, p):
+        for f in os.listdir(p):
+            if ".z64" in Path(f).suffixes:
+                return f
+        return None
+
+    def launchRom(self, hack):
+        if not js.get("emulator"):
+            fname = QFileDialog.getOpenFileName(
+                self, "choose emulator", "c:\\", "executables (*.exe)"
+            )[0]
+            if fname:
+                self.emulator = fname
+                self.js["emulator"] = fname
+                jsF = open(self.jsPath, "w")
+                jsF.write(json.dumps(self.js))
+                jsF.close()
+            else:
+                self.updateStatus("Choose emu to launch roms")
+                return
+        if self.pj16.isChecked():
+            subprocess.Popen(
+                f"{self.emulator} {hack}",
+                stdin=None,
+                stdout=None,
+                stderr=None,
+                text=True,
+            )
+        else:
+            subprocess.Popen(
+                f'{self.emulator} "{hack}"',
+                stdin=None,
+                stdout=None,
+                stderr=None,
+                text=True,
+            )
+
+    # settings updates
+    def UpdateEmu(self):
+        fname = QFileDialog.getOpenFileName(
+            self, "choose emulator", "c:\\", "executables (*.exe)"
+        )[0]
+        if fname:
+            self.emulator = fname
+            self.js["emulator"] = fname
+            jsF = open(self.jsPath, "w")
+            jsF.write(json.dumps(self.js))
+            jsF.close()
+        else:
+            self.updateStatus("Choose emu to launch roms")
+
+    def UpdateVan(self):
+        fname = self.getFile()
+        if fname:
+            self.emulator = fname
+            self.js["emulator"] = fname
+            jsF = open(self.jsPath, "w")
+            jsF.write(json.dumps(self.js))
+            jsF.close()
+        else:
+            self.updateStatus("Choose good ROM")
+
+    # downloading a hack
+    def DownloadHack(self, widg):
+        if not self.vanilla:
+            van = self.getFile()
+            if not van:
+                self.updateStatus("choose vanilla rom to patch")
+                return
+        widg.get_hack().DownloadAndPatch(self.vers.root, self.vanilla)
+        self.updateStatus(
+            f"{widg.get_hack().HackName} ver {widg.get_hack().Version} downloaded and patched"
+        )
+        self.UpdateDownloadedHacks(self.downloaded)
+
+    def getFile(self):
+        fname = QFileDialog.getOpenFileName(
+            self, "choose vanilla", "c:\\", "z64 files (*.z64)"
+        )[0]
+        if not fname:
+            self.updateStatus("no ROM selected")
+            return None
+        with open(fname, "rb") as mario:
+            m = mario.read()
+            if b"cZ+\xff\x8b\x02#&" == m[16:24]:
+                self.updateStatus("Vanilla Rom Chosen Sucessfully")
+                return fname
+            else:
+                self.updateStatus("Wrong ROM chosen")
+                self.getFile()
+
+    # updating list after download
+    def UpdateDownloadedHacks(self, downloaded):
+        downloaded.clear()
+        Path("hacks").mkdir(exist_ok=True, parents=True)
+        for a in os.listdir(os.path.join(os.getcwd(), "hacks")):
+            item = downloaded.add_item(a, downloaded.widget)
+            self.AddDownloadedVers(downloaded, a, item)
+
+    def AddDownloadedVers(self, downloaded, name, item):
+        vers = downloaded.get_folder(name)
+        for a in vers:
+            b = downloaded.add_item(f"{a}", item)
+
+
+class PJ64_Settings(QWidget):
+    def __init__(self, window, app):
+        super().__init__()
+        self.resize(200, 100)  # idk
+        self.setWindowTitle("Quick Patch Settings")
+        font = QFont()
+        font.setPointSize(12)
+        self.setFont(font)
+        self.layout = QVBoxLayout(self)
+        self.setLayout(self.layout)
+        self.window = window
+        btn = QPushButton("Change Vanilla Rom")
+        btn.clicked.connect(window.UpdateVan)
+        self.layout.addWidget(btn)
+        btn = QPushButton("Change Emulator Path")
+        btn.clicked.connect(window.UpdateEmu)
+        self.layout.addWidget(btn)
+        window.pj16 = QCheckBox("emu is pj64 1.6")
+        self.layout.addWidget(window.pj16)
+
+    def closeEvent(self, event):
+        self.window.updateStatus("Settings saved")
+
+    def addRadio(self, txt, ly, app):
+        btn = QRadioButton((f"{txt} Theme"))
+        btn.clicked.connect(partial(self.ChangeTheme, app, txt))
+        ly.addWidget(btn)
+
+    def ChangeTheme(self, app, t):
+        file = QFile((f":/{t.lower()}/stylesheet.qss"))
+        file.open(QFile.ReadOnly | QFile.Text)
+        stream = QTextStream(file)
+        app.setStyleSheet(stream.readAll())
+
+
+# make list widget an attr of this class
+class List:
+    def __init__(self):
+        self.widget = QListWidget()
+        self.widget.setWordWrap(True)
+        self.hack_data = {}
+
+    def add_item(self, item, hack):
+        self.hack_data[self.widget.count()] = hack
+        self.widget.addItem(item)
+
+    def add_hacks(self, hacks):
+        for h in hacks:
+            self.add_item(f"{h.HackName} - {h.Creator}", h)
+
+    def add_versions(self, hacks):
+        for h in hacks:
+            self.add_item(f"Version {h.Version}", h)
+
+    def clear(self):
+        self.widget.clear()
+        self.hack_data = {}
+
+    def get_hack(self):
+        return self.hack_data[self.widget.currentRow()]
+
+
+class Tree:
+    def __init__(self):
+        self.widget = QTreeWidget()
+        self.widget.setColumnCount(1)
+        self.widget.setHeaderHidden(True)
+        self.widget.setWordWrap(True)
+
+    def add_item(self, item, parent):
+        a = QTreeWidgetItem(parent)
+        a.setText(0, item)
+        self.widget.addTopLevelItem(a)
+        return a
+
+    def clear(self):
+        self.widget.clear()
+
+    def get_folder(self, name):
+        return os.listdir(os.path.join(os.getcwd(), Path(f"hacks/{name}")))
+
+
+def init_main_gui(rhp, js, jsPath):
+    # build GUI
+    app = QApplication([])
+    window = Main_Window()
+    window.rhp = rhp
+    TopRow = QHBoxLayout()
+    window.status = window.add_label("Boot Success")
+    window.status.setAlignment(Qt.AlignCenter)
+    ent = window.add_entry(Bind=None)
+    window.add_layout(TopRow)
+    # make hack list widget
+    HackList = List()
+    HackList.widget.clicked.connect(partial(window.ChooseHack, HackList))
+    HackList.widget.setAlternatingRowColors(True)
+    ent.textChanged.connect(partial(window.UpdateHackList, HackList))
+    # version list and downloaded hacks
+    DownloadedHacks = Tree()
+    DownloadedHacks.widget.itemDoubleClicked.connect(window.TreeLaunch)
+    VersionList = List()
+    VersionList.widget.doubleClicked.connect(partial(window.DownloadHack, VersionList))
+    MidRow = QHBoxLayout()
+    VerSplit = QVBoxLayout()
+    MidRow.addWidget(HackList.widget)
+    vers = window.add_label("Versions", layout=VerSplit)
+    VerSplit.addWidget(VersionList.widget)
+    window.add_label("Downloaded Hacks", layout=VerSplit)
+    VerSplit.addWidget(DownloadedHacks.widget)
+    # adding layouts
+    window.add_layout(MidRow)
+    window.add_layout(VerSplit, layout=MidRow)
+    window.show()
+    window.hacklist = HackList
+    window.verlist = VersionList
+    window.downloaded = DownloadedHacks
+    window.UpdateDownloadedHacks(DownloadedHacks)
+    window.hacklist.add_hacks(rhp.hacks)
+    # bottom buttons layout
+    BotRow = QHBoxLayout()
+    window.add_layout(BotRow)
+    # settings window
+    qp_set = PJ64_Settings(window, app)
+    window.settings = qp_set
+    btn = window.add_button(
+        "Change Settings", Bind=partial(window.chng_settings, qp_set), layout=BotRow
+    )
+    # launch rom button
+    btn = window.add_button("Launch Rom", Bind=window.launchRomBtn, layout=BotRow)
+    # add js vars
+    window.js = js
+    window.jsPath = jsPath
+
+    # start with dark theme as default
+    file = QFile(":/dark/stylesheet.qss")
+    file.open(QFile.ReadOnly | QFile.Text)
+    stream = QTextStream(file)
+    app.setStyleSheet(stream.readAll())
+    if not js.get("Vanilla"):
+        dg = QFileDialog()
+        # dg.setacceptMode(QFileDialog.AcceptOpen)
+        # dg.setFilter("rom files (*.z64)")
+        van = window.getFile()
+        if van:
+            js["Vanilla"] = van
+        else:
+            js["Vanilla"] = None
+        jsF = open(jsPath, "w")
+        jsF.write(json.dumps(js))
+        jsF.close()
+    window.vanilla = js["Vanilla"]
+    window.emulator = js.get("emulator")
+    sys.exit(app.exec_())
+
+
+if __name__ == "__main__":
+    jsPath = Path("config.json")
+    if jsPath.exists():
+        jsF = open(jsPath, "r")
+    else:
+        # create file
+        jsF = open(jsPath, "w")
+        jsF.write("{}")
+        jsF.close()
+        jsF = open(jsPath, "r")
+    js = json.load(jsF)
+    jsF.close()
+    rhp = get_all_sm64rh_hacks()
+    init_main_gui(rhp, js, jsPath)
