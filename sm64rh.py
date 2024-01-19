@@ -1,58 +1,8 @@
-from html.parser import HTMLParser
-from collections import namedtuple
 from re import subn
 from functools import lru_cache
-import requests
-
-
-class romhacksParser(HTMLParser):
-    mainMap = {1: "HackName", 2: "Creator", 3: "Release", 4: "Tags"}
-    HackMap = {
-        1: "HackName",
-        2: "Version",
-        3: "Link",
-        4: "Creator",
-        5: "Star_Count",
-        6: "Release",
-    }
-
-    def start(self, main):
-        self.HackTable = False
-        self.hacks = []
-        self.main = main
-        self.lastHack = 0
-        self.header = 0
-        self.cell = None
-
-    def handle_data(self, data):
-        if self.HackTable and self.cell:
-            if self.main:
-                setattr(self.lastHack, self.mainMap[self.cell], data)
-            else:
-                setattr(self.lastHack, self.HackMap[self.cell], data)
-
-    def handle_starttag(self, tag, attrs):
-        if tag == "table":
-            for a in attrs:
-                if a[0] == "id" and a[1] == "myTable":
-                    self.HackTable = True
-        if tag == "tr" and self.HackTable:
-            if not self.header:
-                self.header = 1
-            else:
-                self.cell = 0
-                self.lastHack = Hack()
-                self.hacks.append(self.lastHack)
-        if tag == "td" and self.HackTable:
-            self.cell += 1
-        if tag == "a" and self.HackTable:
-            for a in attrs:
-                if a[0] == "href":
-                    self.lastHack.url = a[1]
-
-    def handle_endtag(self, tag):
-        if tag == "table" and self.HackTable:
-            self.HackTable = False
+import requests, os, shutil, zipfile, subprocess
+from urllib.parse import urljoin
+from pathlib import Path
 
 
 # storage class, but won't data class because I dont have all class data at once
@@ -68,18 +18,24 @@ class Hack:
                 x = x.replace(a, " ")
             return x
 
-        name = Path(f"hacks/{rpinv(self.HackName)}/{rpinv(self.Version)}")
+        name = Path(f"hacks/{rpinv(self.hack_name)}/{rpinv(self.version)}")
         if os.path.exists(name):
             shutil.rmtree(name)
         name.mkdir(exist_ok=True, parents=True)
-        hack = requests.get(urljoin(root, self.url))
+        # this is very unintuitive
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        }
+        hack = requests.head(root + self.url, allow_redirects=False, headers=headers)
+        print(urljoin(root, hack.headers["Location"]))
+        hack = requests.get(urljoin(root, hack.headers["Location"]))
         with open(
-            name / (f"{rpinv(self.HackName)}_ver_{rpinv(self.Version)}.zip"), "wb"
+            name / (f"{rpinv(self.hack_name)}_ver_{rpinv(self.version)}.zip"), "wb"
         ) as f:
             f.write(hack.content)
-        with zipfile.ZipFile(
-            name / (f"{rpinv(self.HackName)}_ver_{rpinv(self.Version)}.zip")
-        ) as zip_ref:
+        zip = Path(name / self.FindZip(name))
+        print(zipfile.is_zipfile(zip), zip.exists(), zip)
+        with zipfile.ZipFile(Path(name / self.FindZip(name))) as zip_ref:
             zip_ref.extractall(name)
         bps = self.FindBps(name)
         subprocess.call(
@@ -88,7 +44,7 @@ class Hack:
                 "--apply",
                 name / bps,
                 vanilla,
-                name / (f"{rpinv(self.HackName)}.z64"),
+                name / (f"{rpinv(self.hack_name)}.z64"),
                 "--ignore-checksum",
             ]
         )
@@ -100,43 +56,44 @@ class Hack:
                 return f
         return None
 
+    def FindZip(self, path):
+        p = os.path.join(os.getcwd(), path)
+        for f in os.listdir(p):
+            if ".zip" in Path(f).suffixes:
+                return f
+        return None
 
-@lru_cache(maxsize=25)
-def get_sm64rh_hack_page(hack):
-    url = "https://sm64romhacks.com/" + hack.url
-    r = requests.get(url)
-    p = romhacksParser()
-    p.start(0)
-    p.feed(r.text)
-    p.root = url
-    return p
+
+def format_version_js(hack_url: str, hack_name: str):
+    hack_versions = requests.get(
+        f"https://sm64romhacks.com/api/hacks/?hack_name={hack_url}"
+    ).json()["patches"]
+    versions = []
+    for version_js in hack_versions:
+        version = Hack()
+        version.hack_id = version_js["hack_id"]
+        version.hack_name = hack_name
+        version.version = version_js["hack_version"]
+        version.url = str(version_js["hack_id"])
+        version.version_url = hack_url
+        versions.append(version)
+    return versions
 
 
 # format the json
-def format_sm64rh_hacks(js):
-    h_list = namedtuple("hack_list", "hacks")
-    h = []
-    base = "hacks/"
-
-    def get_creator(hack):
-        creators = set()
-        for v in hack["versions"]:
-            creators.update(v["creators"])
-        return ", ".join(creators)
+def format_sm64rh_hacks(js: dict):
+    hack_list = []
 
     for hack in js:
-        h_obj = Hack()
-        h_obj.HackName = hack["name"]
-        h_obj.Creator = get_creator(hack)
-        link = subn("[ ()]", "_", hack["name"])[0]
-        link = subn("[':/]", "", link)[0]
-        link = base + link.strip().lower()
-        h_obj.url = link
-        h.append(h_obj)
-    return h_list(h)
+        hack_obj = Hack()
+        hack_obj.hack_name = hack["hack_name"]
+        hack_obj.creator = hack["hack_author"]
+        hack_obj.url = hack["hack_url"]
+        hack_list.append(hack_obj)
+    return hack_list
 
 
 def get_all_sm64rh_hacks():
-    url = "https://sm64romhacks.com/_data/hacks.json"
-    p = format_sm64rh_hacks(requests.get(url).json()["hacks"])
-    return p
+    url = "https://sm64romhacks.com/api/hacks"
+    hack_list = format_sm64rh_hacks(requests.get(url).json()["hacks"])
+    return hack_list

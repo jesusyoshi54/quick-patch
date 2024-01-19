@@ -127,16 +127,19 @@ class Main_Window(QWidget):
 
     # display site content, search/versions
     def ChooseHack(self, widg):
-        vers = get_sm64rh_hack_page(widg.get_hack())
-        self.vers = vers
+        hack = widg.get_hack()
+        self.vers = format_version_js(hack.url, hack.hack_name)
         self.verlist.clear()
-        self.verlist.add_versions(vers.hacks)
+        self.verlist.add_versions(self.vers)
 
-    def UpdateHackList(self, hacklist, text):
-        hacklist.Clear()
-        for a in self.rhp.hacks:
-            if text.lower() in a.HackName.lower() or text.lower() in a.Creator.lower():
-                hacklist.add_item(f"{a.HackName} - {a.Creator}", a)
+    def update_hack_list_widget(self, hack_list_widget, text):
+        hack_list_widget.clear()
+        for hack in self.hack_list:
+            if (
+                text.lower() in hack.hack_name.lower()
+                or text.lower() in hack.creator.lower()
+            ):
+                hack_list_widget.add_item(f"{hack.hack_name} - {hack.creator}", hack)
 
     def updateStatus(self, s):
         self.status.setText(s)
@@ -228,11 +231,13 @@ class Main_Window(QWidget):
             if not van:
                 self.updateStatus("choose vanilla rom to patch")
                 return
-        widg.get_hack().DownloadAndPatch(self.vers.root, self.vanilla)
-        self.updateStatus(
-            f"{widg.get_hack().HackName} ver {widg.get_hack().Version} downloaded and patched"
+        widg.get_hack().DownloadAndPatch(
+            "https://sm64romhacks.com/hacks/download.php?hack_id=", self.vanilla
         )
-        self.UpdateDownloadedHacks(self.downloaded)
+        self.updateStatus(
+            f"{widg.get_hack().hack_name} ver {widg.get_hack().version} downloaded and patched"
+        )
+        self.update_downloaded_hacks_widget(self.downloaded)
 
     def getFile(self):
         fname = QFileDialog.getOpenFileName(
@@ -251,7 +256,7 @@ class Main_Window(QWidget):
                 self.getFile()
 
     # updating list after download
-    def UpdateDownloadedHacks(self, downloaded):
+    def update_downloaded_hacks_widget(self, downloaded):
         downloaded.clear()
         Path("hacks").mkdir(exist_ok=True, parents=True)
         for a in os.listdir(os.path.join(os.getcwd(), "hacks")):
@@ -312,11 +317,11 @@ class List:
 
     def add_hacks(self, hacks):
         for h in hacks:
-            self.add_item(f"{h.HackName} - {h.Creator}", h)
+            self.add_item(f"{h.hack_name} - {h.creator}", h)
 
     def add_versions(self, hacks):
         for h in hacks:
-            self.add_item(f"Version {h.Version}", h)
+            self.add_item(f"Version {h.version}", h)
 
     def clear(self):
         self.widget.clear()
@@ -346,53 +351,61 @@ class Tree:
         return os.listdir(os.path.join(os.getcwd(), Path(f"hacks/{name}")))
 
 
-def init_main_gui(rhp, js, jsPath):
+def init_main_gui(hack_list, js, jsPath):
     # build GUI
     app = QApplication([])
     window = Main_Window()
-    window.rhp = rhp
-    TopRow = QHBoxLayout()
+    window.hack_list = hack_list
+    top_row_ly = QHBoxLayout()
     window.status = window.add_label("Boot Success")
     window.status.setAlignment(Qt.AlignCenter)
     ent = window.add_entry(Bind=None)
-    window.add_layout(TopRow)
+    window.add_layout(top_row_ly)
     # make hack list widget
-    HackList = List()
-    HackList.widget.clicked.connect(partial(window.ChooseHack, HackList))
-    HackList.widget.setAlternatingRowColors(True)
-    ent.textChanged.connect(partial(window.UpdateHackList, HackList))
+    hack_list_widget = List()
+    hack_list_widget.widget.clicked.connect(
+        partial(window.ChooseHack, hack_list_widget)
+    )
+    hack_list_widget.widget.setAlternatingRowColors(True)
+    ent.textChanged.connect(partial(window.update_hack_list_widget, hack_list_widget))
     # version list and downloaded hacks
-    DownloadedHacks = Tree()
-    DownloadedHacks.widget.itemDoubleClicked.connect(window.TreeLaunch)
-    VersionList = List()
-    VersionList.widget.doubleClicked.connect(partial(window.DownloadHack, VersionList))
-    MidRow = QHBoxLayout()
-    VerSplit = QVBoxLayout()
-    MidRow.addWidget(HackList.widget)
-    vers = window.add_label("Versions", layout=VerSplit)
-    VerSplit.addWidget(VersionList.widget)
-    window.add_label("Downloaded Hacks", layout=VerSplit)
-    VerSplit.addWidget(DownloadedHacks.widget)
+    downloaded_hacks_widget = Tree()
+    downloaded_hacks_widget.widget.itemDoubleClicked.connect(window.TreeLaunch)
+    version_list_widget = List()
+    version_list_widget.widget.doubleClicked.connect(
+        partial(window.DownloadHack, version_list_widget)
+    )
+    mid_row_ly = QHBoxLayout()
+    version_split_ly = QVBoxLayout()
+    mid_row_ly.addWidget(hack_list_widget.widget)
+    vers = window.add_label("Versions", layout=version_split_ly)
+    version_split_ly.addWidget(version_list_widget.widget)
+    window.add_label("Downloaded Hacks", layout=version_split_ly)
+    version_split_ly.addWidget(downloaded_hacks_widget.widget)
     # adding layouts
-    window.add_layout(MidRow)
-    window.add_layout(VerSplit, layout=MidRow)
+    window.add_layout(mid_row_ly)
+    window.add_layout(version_split_ly, layout=mid_row_ly)
     window.show()
-    window.hacklist = HackList
-    window.verlist = VersionList
-    window.downloaded = DownloadedHacks
-    window.UpdateDownloadedHacks(DownloadedHacks)
-    window.hacklist.add_hacks(rhp.hacks)
+    window.hacklist = hack_list_widget
+    window.verlist = version_list_widget
+    window.downloaded = downloaded_hacks_widget
+    window.update_downloaded_hacks_widget(downloaded_hacks_widget)
+    window.hacklist.add_hacks(hack_list)
     # bottom buttons layout
-    BotRow = QHBoxLayout()
-    window.add_layout(BotRow)
+    bottom_row_ly = QHBoxLayout()
+    window.add_layout(bottom_row_ly)
     # settings window
     qp_set = PJ64_Settings(window, app)
     window.settings = qp_set
     btn = window.add_button(
-        "Change Settings", Bind=partial(window.chng_settings, qp_set), layout=BotRow
+        "Change Settings",
+        Bind=partial(window.chng_settings, qp_set),
+        layout=bottom_row_ly,
     )
     # launch rom button
-    btn = window.add_button("Launch Rom", Bind=window.launchRomBtn, layout=BotRow)
+    btn = window.add_button(
+        "Launch Rom", Bind=window.launchRomBtn, layout=bottom_row_ly
+    )
     # add js vars
     window.js = js
     window.jsPath = jsPath
@@ -431,5 +444,5 @@ if __name__ == "__main__":
         jsF = open(jsPath, "r")
     js = json.load(jsF)
     jsF.close()
-    rhp = get_all_sm64rh_hacks()
-    init_main_gui(rhp, js, jsPath)
+    hack_list = get_all_sm64rh_hacks()
+    init_main_gui(hack_list, js, jsPath)
