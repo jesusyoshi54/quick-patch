@@ -45,5 +45,5 @@ This project packages an .exe created with pyinstaller.
 To create your own executable, install pyinstaller, and compile with
 
 ```
-pyinstaller qp.py -F
+pyinstaller qp.py -F -w
 ```
