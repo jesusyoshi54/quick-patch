@@ -128,9 +128,8 @@ class Main_Window(QWidget):
     # display site content, search/versions
     def ChooseHack(self, widg):
         hack = widg.get_hack()
-        self.vers = format_version_js(hack.url, hack.hack_name)
         self.verlist.clear()
-        self.verlist.add_versions(self.vers)
+        self.verlist.add_versions(hack.versions)
 
     def update_hack_list_widget(self, hack_list_widget, text):
         hack_list_widget.clear()
@@ -205,7 +204,7 @@ class Main_Window(QWidget):
             self, "choose emulator", "c:\\", "executables (*.exe)"
         )[0]
         if fname:
-            self.emulator = fname
+            self.emulator = Path(fname)
             self.js["emulator"] = fname
             jsF = open(self.jsPath, "w")
             jsF.write(json.dumps(self.js))
@@ -216,8 +215,8 @@ class Main_Window(QWidget):
     def UpdateVan(self):
         fname = self.getFile()
         if fname:
-            self.emulator = fname
-            self.js["emulator"] = fname
+            self.vanilla = Path(fname)
+            self.js["vanilla"] = fname
             jsF = open(self.jsPath, "w")
             jsF.write(json.dumps(self.js))
             jsF.close()
@@ -232,7 +231,7 @@ class Main_Window(QWidget):
                 self.updateStatus("choose vanilla rom to patch")
                 return
         widg.get_hack().DownloadAndPatch(
-            "https://sm64romhacks.com/hacks/download.php?hack_id=", self.vanilla
+            "https://sm64romhacks.com/hacks/download/", self.vanilla
         )
         self.updateStatus(
             f"{widg.get_hack().hack_name} ver {widg.get_hack().version} downloaded and patched"
@@ -319,9 +318,9 @@ class List:
         for h in hacks:
             self.add_item(f"{h.hack_name} - {h.creator}", h)
 
-    def add_versions(self, hacks):
-        for h in hacks:
-            self.add_item(f"Version {h.version}", h)
+    def add_versions(self, hack_versions):
+        for hack in hack_versions:
+            self.add_item(f"Version {hack.version}", hack)
 
     def clear(self):
         self.widget.clear()
@@ -415,20 +414,20 @@ def init_main_gui(hack_list, js, jsPath):
     file.open(QFile.ReadOnly | QFile.Text)
     stream = QTextStream(file)
     app.setStyleSheet(stream.readAll())
-    if not js.get("Vanilla"):
+    if not js.get("vanilla"):
         dg = QFileDialog()
         # dg.setacceptMode(QFileDialog.AcceptOpen)
         # dg.setFilter("rom files (*.z64)")
         van = window.getFile()
         if van:
-            js["Vanilla"] = van
+            js["vanilla"] = van
         else:
-            js["Vanilla"] = None
+            js["vanilla"] = None
         jsF = open(jsPath, "w")
         jsF.write(json.dumps(js))
         jsF.close()
-    window.vanilla = js["Vanilla"]
-    window.emulator = js.get("emulator")
+    window.vanilla = Path(js["vanilla"]) if js["vanilla"] else None
+    window.emulator = Path(js.get("emulator")) if js.get("emulator") else None
     sys.exit(app.exec_())
 
 
